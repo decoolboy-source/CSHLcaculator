@@ -4990,10 +4990,23 @@ window.CSHL_Report = (function () {
     const rooms = await CSHL_Projects.getProjectRooms(proj.id);
     if (!rooms.length) { await App.Modal.alert(t('reportNoDataTitle'), t('reportProjectEmptyDesc')); return; }
 
-    const sections = rooms.map(function (rm, idx) {
-      return buildRoomSectionHtml(rm.result, rm.input, rm.roomName, proj, idx === 0);
+    const totalKw = rooms.reduce(function (s, rm) { return s + rm.result.Q_total_kW; }, 0);
+    const summaryHtml =
+      '<div><h1>' + t('reportTitle') + ' — ' + proj.name + '</h1>' +
+      '<h2>' + t('reportProjectSummarySheet') + '</h2>' +
+      '<table><tr><th>' + t('reportColRoom') + '</th><th>' + t('reportShape') + '</th><th class="right">' + t('reportFloorArea') + '</th><th class="right">' + t('reportVolume') + '</th><th class="right">kW</th><th class="right">TR</th><th class="right">W/m²</th><th>' + t('reportDiagResult') + '</th></tr>' +
+      rooms.map(function (rm) {
+        const r = rm.result;
+        const pass = r.diagnostics.overallPass;
+        return '<tr><td>' + rm.roomName + '</td><td>' + shapeLabel(r) + '</td><td class="right">' + r.geom.area.toFixed(1) + '</td><td class="right">' + r.geom.volume.toFixed(1) + '</td><td class="right">' + r.Q_total_kW.toFixed(2) + '</td><td class="right">' + (r.Q_total_kW / 3.517).toFixed(1) + '</td><td class="right">' + (r.Q_total_kW * 1000 / r.geom.area).toFixed(1) + '</td><td>' + (pass ? t('reportPass') : t('reportFail')) + '</td></tr>';
+      }).join('') +
+      '<tr style="font-weight:800;background:#ecfdf5"><td colspan="4">' + t('reportProjectTotalLabel') + '</td><td class="right">' + totalKw.toFixed(2) + '</td><td class="right">' + (totalKw / 3.517).toFixed(1) + '</td><td></td><td></td></tr>' +
+      '</table></div>';
+
+    const sections = rooms.map(function (rm) {
+      return buildRoomSectionHtml(rm.result, rm.input, rm.roomName, proj, false);
     }).join('');
-    const html = wrapHtmlDocument(t('reportTitle') + ' — ' + proj.name, sections);
+    const html = wrapHtmlDocument(t('reportTitle') + ' — ' + proj.name, summaryHtml + sections);
     await openOrShareHtmlReport(html, 'Project_' + proj.name.replace(/\s+/g, '_') + '.html');
   }
 
