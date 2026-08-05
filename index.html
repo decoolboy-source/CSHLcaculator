@@ -1798,7 +1798,7 @@ window.ColdStorageHeatLoad = window.ColdStorageHeatLoad || {};
     const Q_forklift_dock = calc.vehicleLoad(dockVehicleSpec, input.n_forklift_dock, t_forklift_dock);
     const Q_forklift = Q_forklift_internal + Q_forklift_dock;
 
-    const Q_lights = calc.lightsLoad(input.n_lights, input.kw_lights * 1000, input.t_lights);
+    const Q_lights = calc.lightsLoad(1, geom.area * (input.lightingWm2 || 0), input.t_lights);
     const Q_fans = calc.evaporatorFanLoad(input.n_evap, input.fan_per_evap, input.kw_fan, input.t_fan);
     const Q_defrost = calc.defrostHeaterLoad(input.n_evap, input.heater_per_evap, input.kw_heater, input.defrost_times, input.defrost_duration);
 
@@ -1934,7 +1934,8 @@ window.CSHL_I18N = (function () {
       avgVelocityLabel: 'Vận tốc gió TB (m/s)', hoursOpenLabel: 'Giờ mở/ngày',
 
       secInternal: 'Tải nội bộ — Nhân sự & chiếu sáng', nPeopleLabel: 'Số người', tPeopleLabel: 'Giờ làm/ngày',
-      nLightsLabel: 'Số đèn (bộ)', kwLightsLabel: 'Công suất đèn (kW/bộ)', tLightsLabel: 'Giờ đèn sáng',
+      lightingWm2Label: 'Mật độ chiếu sáng (W/m²)', tLightsLabel: 'Giờ đèn sáng (giờ/ngày)',
+      syncLightingHoursLabel: 'Đồng bộ theo giờ hoạt động (xe nâng nội bộ/dock, lấy giá trị lớn hơn)',
       subInternalVehicle: 'Xe nâng nội bộ (hạ hàng trong kho)', subDockVehicle: 'Xe kéo dock (xuất/nhập ra ngoài)',
       vehicleTypeLabel: 'Loại xe', vehicleCountLabel: 'Số lượng',
       includePackingCheckbox: 'Tính tải luân chuyển bao bì/pallet (Packing related load)',
@@ -2138,6 +2139,8 @@ window.CSHL_I18N = (function () {
       reportConfidenceFlagProvince: 'Dữ liệu khí hậu khu vực này được MƯỢN từ tỉnh "{province}" do QCVN không có trạm khí tượng riêng.',
       reportConfidenceFlagStack: 'Có ước tính tải rò rỉ do chênh áp cột khí (stack-effect) — diện tích rò rỉ là giá trị ước lượng, chưa đo đạc thực tế (blower-door test).',
       reportConfidenceFlagRackTooSmall: '⚠ Kích thước phòng quá nhỏ so với module kệ đôi tiêu chuẩn (kệ+lối đi+kệ) tại thời điểm tính — sức chứa pallet có thể không thực tế, cần kiểm tra lại kích thước hoặc hướng bố trí.',
+      reportExpMarkFootnote: '* Đánh dấu giá trị là hệ số kinh nghiệm/tham khảo do người dùng cung cấp — không phải trích dẫn chuẩn ngành chính thức. Xem chi tiết ở mục "Tiêu chuẩn & nguồn dữ liệu áp dụng".',
+      reportLightingSynced: 'đồng bộ theo giờ hoạt động',
       reportPowerDensityArea: 'Công suất riêng theo diện tích', reportPowerDensityVolume: 'Công suất riêng theo thể tích',
       reportSecMaterial: '4. Vật liệu cách nhiệt', reportWallPanel: 'Panel tường/trần', reportFloorPanel: 'Nền',
       reportUValue: 'Hệ số truyền nhiệt U',
@@ -2252,7 +2255,8 @@ window.CSHL_I18N = (function () {
       avgVelocityLabel: 'Avg wind velocity (m/s)', hoursOpenLabel: 'Hours open/day',
 
       secInternal: 'Internal Load — Personnel & Lighting', nPeopleLabel: 'Number of people', tPeopleLabel: 'Working hours/day',
-      nLightsLabel: 'Number of lights', kwLightsLabel: 'Light power (kW/unit)', tLightsLabel: 'Lighting hours',
+      lightingWm2Label: 'Lighting density (W/m²)', tLightsLabel: 'Lighting hours (h/day)',
+      syncLightingHoursLabel: 'Sync with operating hours (internal/dock forklift, use the larger)',
       subInternalVehicle: 'Internal forklift (in-room handling)', subDockVehicle: 'Dock truck (inbound/outbound)',
       vehicleTypeLabel: 'Vehicle type', vehicleCountLabel: 'Quantity',
       includePackingCheckbox: 'Include packing/pallet turnover load (Packing related load)',
@@ -2456,6 +2460,8 @@ window.CSHL_I18N = (function () {
       reportConfidenceFlagProvince: 'Climate data for this region is BORROWED from province "{province}" since QCVN has no dedicated weather station.',
       reportConfidenceFlagStack: 'Includes a stack-effect infiltration estimate — the leak area is an estimated value, not measured on-site (e.g. via blower-door test).',
       reportConfidenceFlagRackTooSmall: '⚠ Room dimensions were too small for a standard double-bay rack module (rack+aisle+rack) at the time of calculation — pallet capacity may be unrealistic; check dimensions or orientation.',
+      reportExpMarkFootnote: '* Marks a value that is a reference/experience-based coefficient provided by the user — not an official industry-standard citation. See "Standards & Data Sources Applied" for details.',
+      reportLightingSynced: 'synced with operating hours',
       reportPowerDensityArea: 'Power density per floor area', reportPowerDensityVolume: 'Power density per volume',
       reportSecMaterial: '4. Insulation Materials', reportWallPanel: 'Wall/roof panel', reportFloorPanel: 'Floor',
       reportUValue: 'U-value',
@@ -3203,6 +3209,12 @@ window.CSHL_UI = (function () {
     scheduleAutoCalc();
   }
   function markPalletManual() { lastPalletMethod = 'manual'; }
+  // Nếu người dùng tự gõ tay giờ chiếu sáng, tự bỏ tick "đồng bộ" — tránh app âm thầm ghi đè
+  // lại giá trị họ vừa sửa ở lần tính tiếp theo.
+  function onTLightsManualChange() {
+    const syncEl = document.getElementById('syncLightingHours');
+    if (syncEl) syncEl.checked = false;
+  }
 
   // ── Áp dụng preset cấu hình TOÀN DIỆN theo loại kho (mục "Loại kho"): hình học, sức chứa
   // (theo mật độ pallet/m²/tầng), dàn lạnh/quạt, số người, xe nâng, và cửa/lỗ mở.
@@ -3253,8 +3265,8 @@ window.CSHL_UI = (function () {
     if (preset.kw_fan !== undefined) { const el = document.getElementById('kw_fan'); if (el) el.value = preset.kw_fan; }
     if (preset.n_people !== undefined) { const el = document.getElementById('n_people'); if (el) el.value = preset.n_people; }
     if (preset.lightingWm2 !== undefined) {
-      const nlEl = document.getElementById('n_lights'); const klEl = document.getElementById('kw_lights');
-      if (nlEl && klEl) { nlEl.value = 1; klEl.value = (targetArea * preset.lightingWm2 / 1000).toFixed(3); }
+      const lwEl = document.getElementById('lightingWm2');
+      if (lwEl) lwEl.value = preset.lightingWm2;
     }
 
     // ── 4) Lọc + đặt mặc định xe nâng nội bộ theo loại kho (vd: ASRS chỉ có robot, không có forklift) ──
@@ -3477,9 +3489,11 @@ window.CSHL_UI = (function () {
       '<div class="grid-2" style="margin-bottom:8px">' +
       '<div><div class="flabel">' + t('nPeopleLabel') + '</div><input type="number" id="n_people" value="" placeholder="' + t('blankFieldPlaceholder') + '" step="1" min="0" oninput="CSHL_UI.scheduleAutoCalc()"></div>' +
       '<div><div class="flabel">' + t('tPeopleLabel') + '</div><input type="number" id="t_people" value="8" step="0.1" min="0" oninput="CSHL_UI.scheduleAutoCalc()"></div>' +
-      '<div><div class="flabel">' + t('nLightsLabel') + '</div><input type="number" id="n_lights" value="20" step="1" min="0" oninput="CSHL_UI.scheduleAutoCalc()"></div>' +
-      '<div><div class="flabel">' + t('kwLightsLabel') + '</div><input type="number" id="kw_lights" value="0.15" step="0.01" min="0" oninput="CSHL_UI.scheduleAutoCalc()"></div>' +
-      '<div style="grid-column:1/-1"><div class="flabel">' + t('tLightsLabel') + '</div><input type="number" id="t_lights" value="5.9" step="0.1" min="0" oninput="CSHL_UI.scheduleAutoCalc()"></div></div>' +
+      '<div><div class="flabel">' + t('lightingWm2Label') + '</div><input type="number" id="lightingWm2" value="" placeholder="' + t('blankFieldPlaceholder') + '" step="0.1" min="0" oninput="CSHL_UI.scheduleAutoCalc()"></div>' +
+      '<div style="grid-column:1/-1"><div class="flabel">' + t('tLightsLabel') + '</div>' +
+      '<input type="number" id="t_lights" value="5.9" step="0.1" min="0" oninput="CSHL_UI.onTLightsManualChange();CSHL_UI.scheduleAutoCalc()">' +
+      '<label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--slate-400);cursor:pointer">' +
+      '<input type="checkbox" id="syncLightingHours" style="width:auto" onchange="CSHL_UI.scheduleAutoCalc()">' + t('syncLightingHoursLabel') + '</label></div>' +
       '<div class="sub-label">' + t('subInternalVehicle') + '</div>' +
       '<div class="grid-2" style="margin-bottom:6px">' +
       '<div><div class="flabel">' + t('vehicleTypeLabel') + '</div><select id="internalVehicleType" onchange="CSHL_UI.scheduleAutoCalc()">' +
@@ -3629,7 +3643,8 @@ window.CSHL_UI = (function () {
       n_forklift_dock: num('n_forklift_dock'),
       includePackingInternalLoad: document.getElementById('includePackingInternalLoad').checked,
       palletWeight: numOr('palletWeight', 750),
-      n_lights: num('n_lights'), kw_lights: num('kw_lights'), t_lights: num('t_lights'),
+      lightingWm2: num('lightingWm2'), t_lights: num('t_lights'),
+      syncLightingHours: document.getElementById('syncLightingHours') ? document.getElementById('syncLightingHours').checked : false,
       n_evap: num('n_evap'), fan_per_evap: num('fan_per_evap'), kw_fan: num('kw_fan'), t_fan: num('t_fan'),
       defrost_times: num('defrost_times'), defrost_duration: num('defrost_duration'),
       heater_per_evap: num('heater_per_evap'), kw_heater: num('kw_heater'),
@@ -3748,9 +3763,9 @@ window.CSHL_UI = (function () {
     document.getElementById('dockVehicleType').value = saved.dockVehicleType;
     document.getElementById('n_forklift_dock').value = saved.n_forklift_dock;
     document.getElementById('includePackingInternalLoad').checked = saved.includePackingInternalLoad;
-    document.getElementById('n_lights').value = saved.n_lights;
-    document.getElementById('kw_lights').value = saved.kw_lights;
+    document.getElementById('lightingWm2').value = saved.lightingWm2 != null ? saved.lightingWm2 : '';
     document.getElementById('t_lights').value = saved.t_lights;
+    if (document.getElementById('syncLightingHours')) document.getElementById('syncLightingHours').checked = !!saved.syncLightingHours;
     document.getElementById('n_evap').value = saved.n_evap;
     document.getElementById('fan_per_evap').value = saved.fan_per_evap;
     document.getElementById('kw_fan').value = saved.kw_fan;
@@ -3777,7 +3792,7 @@ window.CSHL_UI = (function () {
     await calculate();
   }
 
-  async function calculate() {
+  async function calculate(_resyncGuard) {
     let input;
     try { input = gatherInputs(); } catch (e) { return; }
     const db = {
@@ -3793,6 +3808,20 @@ window.CSHL_UI = (function () {
       document.getElementById('resultsContent').style.display = 'none';
       return;
     }
+
+    // ── Đồng bộ giờ chiếu sáng theo giờ hoạt động (nếu bật checkbox) — lấy giá trị LỚN HƠN
+    // giữa xe nâng nội bộ và dock, vì kho còn xe nào hoạt động thì vẫn cần chiếu sáng.
+    // Guard _resyncGuard tránh đệ quy vô hạn — chỉ tính lại tối đa 1 lần/lượt gọi thủ công. ──
+    const syncEl = document.getElementById('syncLightingHours');
+    if (syncEl && syncEl.checked && !_resyncGuard) {
+      const targetHours = Math.max(result.t_forklift_internal || 0, result.t_forklift_dock || 0);
+      const tLightsEl = document.getElementById('t_lights');
+      if (tLightsEl && Math.abs(parseFloat(tLightsEl.value || 0) - targetHours) > 0.05) {
+        tLightsEl.value = targetHours.toFixed(1);
+        return calculate(true);
+      }
+    }
+
     lastResult = result; lastInput = input;
     const diag = App.calc.runDiagnostics(input, result);
     result.diagnostics = diag;
@@ -4019,7 +4048,7 @@ window.CSHL_UI = (function () {
     addOpening: addOpening, renderOpeningsList: renderOpeningsList, onOpeningTypeChange: onOpeningTypeChange,
     updateOpeningField: updateOpeningField, removeOpening: removeOpening, scheduleAutoCalc: scheduleAutoCalc,
     onWarehousePresetChange: onWarehousePresetChange, onProductGroupChange: onProductGroupChange,
-    onRackOrientationChange: onRackOrientationChange, markPalletManual: markPalletManual,
+    onRackOrientationChange: onRackOrientationChange, markPalletManual: markPalletManual, onTLightsManualChange: onTLightsManualChange,
     renderInputPanel: renderInputPanel, gatherInputs: gatherInputs, calculate: calculate, renderResults: renderResults, loadInputIntoForm: loadInputIntoForm,
     convPower: convPower, convDensity: convDensity, renderSettingsTab: renderSettingsTab,
     onUnitSystemChange: onUnitSystemChange, saveUnitSettings: saveUnitSettings,
@@ -5085,11 +5114,12 @@ window.CSHL_Report = (function () {
         return '<div style="margin-top:14px;padding:10px 14px;background:#f8fafc;border:1px solid #ddd;border-radius:6px">' +
           '<div style="font-weight:700;font-size:12px;margin-bottom:4px">' + t('reportConfidenceTitle') + ': ' + conf.level + '</div>' +
           (conf.flags.length ? '<ul style="font-size:11px;color:#444;margin:6px 0 0;padding-left:18px;line-height:1.7">' + conf.flags.map(function (f) { return '<li>' + f + '</li>'; }).join('') + '</ul>' : '') +
-          '</div>';
+          '</div>' +
+          '<p style="font-size:10px;color:#888;margin:8px 0 0;font-style:italic">' + t('reportExpMarkFootnote') + '</p>';
       })() +
       '<h2>' + t('reportSec1') + '</h2>' +
       '<table><tr><td>' + t('reportShape') + '</td><td>' + shapeLabel(r) + '</td></tr>' +
-      '<tr><td>' + t('reportWarehouseType') + '</td><td>' + (i.warehouseType ? t('warehouseType' + i.warehouseType.charAt(0).toUpperCase() + i.warehouseType.slice(1)) : t('reportWarehouseTypeCustom')) + '</td></tr>' +
+      '<tr><td>' + t('reportWarehouseType') + '</td><td>' + (i.warehouseType ? (t('warehouseType' + i.warehouseType.charAt(0).toUpperCase() + i.warehouseType.slice(1)) + ' *') : t('reportWarehouseTypeCustom')) + '</td></tr>' +
       '<tr><td>' + t('reportFloorArea') + '</td><td>' + r.geom.area.toFixed(2) + ' m²</td></tr>' +
       '<tr><td>' + t('reportVolume') + '</td><td>' + r.geom.volume.toFixed(2) + ' m³</td></tr></table>' +
       '<h2>' + t('reportSec2') + '</h2>' +
@@ -5118,7 +5148,9 @@ window.CSHL_Report = (function () {
       '<tr><td>' + t('reportPulldownTime') + '</td><td>' + i.pulldown + ' ' + (locale === 'en-US' ? 'hr' : 'giờ') + '</td></tr>' +
       '<tr><td>' + t('reportStorageMode') + '</td><td>' + (i.storageCapacityMode === 'pallet' ? (t('storagePallet') + ' — ' + (i.palletCount || 0) + ' × ' + (i.palletWeight || 0) + ' kg') : t('storageManual') + ' — ' + (i.mass_total_manual || 0) + ' kg') + '</td></tr>' +
       (i.storageCapacityMode === 'pallet' ? '<tr><td>' + t('reportPalletMethodLabel') + '</td><td>' + t('reportPalletMethod_' + (i.palletCountMethod || 'manual')) + '</td></tr>' : '') +
-      '<tr><td>' + t('reportThroughputMode') + '</td><td>' + (i.throughputMode === 'dock' ? (t('throughputDock') + ' — ' + (i.nDocks || 0) + ' dock') : i.throughputMode === 'turnoverPct' ? (t('throughputPct') + ' — ' + (i.turnoverPct || 0) + '%') : (t('throughputManual') + ' — ' + (i.mass_in_manual || 0) + ' kg')) + '</td></tr></table>' +
+      '<tr><td>' + t('reportThroughputMode') + '</td><td>' + (i.throughputMode === 'dock' ? (t('throughputDock') + ' — ' + (i.nDocks || 0) + ' dock') : i.throughputMode === 'turnoverPct' ? (t('throughputPct') + ' — ' + (i.turnoverPct || 0) + '%') : (t('throughputManual') + ' — ' + (i.mass_in_manual || 0) + ' kg')) + '</td></tr>' +
+      (i.lightingWm2 ? '<tr><td>' + t('lightingWm2Label') + ' *</td><td>' + i.lightingWm2 + ' W/m² × ' + i.t_lights + ' ' + (locale === 'en-US' ? 'h/day' : 'giờ/ngày') + (i.syncLightingHours ? ' (' + t('reportLightingSynced') + ')' : '') + '</td></tr>' : '') +
+      '</table>' +
       '<h2>' + t('reportSec4') + '</h2>' +
       '<table><tr><th>' + t('reportItem') + '</th><th>' + t('reportDiagResult') + '</th></tr>' +
       diag.items.map(function (it) { return '<tr><td>' + diagLabel(it) + '</td><td>' + (it.passed ? t('reportPass') : (it.severity === 'error' ? t('reportFail') : t('reportWarn'))) + '</td></tr>'; }).join('') +
@@ -5183,13 +5215,14 @@ window.CSHL_Report = (function () {
       [t('reportEngineer'), proj.engineer || '', t('reportDate'), proj.date || ''],
       [],
       [t('reportColRoom'), roomName],
-      [t('reportWarehouseType'), i.warehouseType ? t('warehouseType' + i.warehouseType.charAt(0).toUpperCase() + i.warehouseType.slice(1)) : t('reportWarehouseTypeCustom')],
+      [t('reportWarehouseType'), i.warehouseType ? (t('warehouseType' + i.warehouseType.charAt(0).toUpperCase() + i.warehouseType.slice(1)) + ' *') : t('reportWarehouseTypeCustom')],
       [t('reportFloorArea') + ' (m²)', r.geom.area.toFixed(2)], [t('reportVolume') + ' (m³)', r.geom.volume.toFixed(2)],
       [t('reportRegion'), i.province || t('reportRegionManual')],
       [t('T_amb'), i.T_amb], [t('RH_amb'), i.RH_amb], [t('T_room'), i.T_room], [t('RH_room'), i.RH_room],
       [],
       [t('reportConfidenceTitle'), computeConfidenceFlags(i).level],
       ...computeConfidenceFlags(i).flags.map(function (f) { return ['', f]; }),
+      [t('reportExpMarkFootnote')],
       [],
       [t('reportItem').toUpperCase(), 'kW', '%'],
       [t('reportQ1'), r.Q_trans.toFixed(3), pct(r.Q_trans, subtotal)],
@@ -5215,6 +5248,7 @@ window.CSHL_Report = (function () {
       [t('reportStorageMode'), i.storageCapacityMode === 'pallet' ? (t('storagePallet') + ' — ' + (i.palletCount || 0) + ' x ' + (i.palletWeight || 0) + 'kg') : (t('storageManual') + ' — ' + (i.mass_total_manual || 0) + 'kg')],
       ...(i.storageCapacityMode === 'pallet' ? [[t('reportPalletMethodLabel'), t('reportPalletMethod_' + (i.palletCountMethod || 'manual'))]] : []),
       [t('reportThroughputMode'), i.throughputMode === 'dock' ? (t('throughputDock') + ' — ' + (i.nDocks || 0) + ' dock') : i.throughputMode === 'turnoverPct' ? (t('throughputPct') + ' — ' + (i.turnoverPct || 0) + '%') : (t('throughputManual') + ' — ' + (i.mass_in_manual || 0) + 'kg')],
+      ...(i.lightingWm2 ? [[t('lightingWm2Label') + ' *', i.lightingWm2 + ' W/m² x ' + i.t_lights + 'h/day' + (i.syncLightingHours ? ' (' + t('reportLightingSynced') + ')' : '')]] : []),
       [],
       [t('excelWallDetail')],
       [t('colPosition'), t('colArea'), t('colU'), 'ΔT(K)', t('colLoad') + '(kW)']
